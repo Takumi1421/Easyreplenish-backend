@@ -1,5 +1,3 @@
-# main.py — FastAPI Backend with SQLite, CORS, and Render Compatibility
-
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -8,18 +6,12 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 import os
 
-# -------------------- DATABASE SETUP --------------------
-
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATABASE_URL = f"sqlite:///{os.path.join(BASE_DIR, 'inventory.db')}"
 
-engine = create_engine(
-    DATABASE_URL, connect_args={"check_same_thread": False}
-)
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
-
-# -------------------- MODELS --------------------
 
 class SKU(Base):
     __tablename__ = "skus"
@@ -30,8 +22,6 @@ class SKU(Base):
 
 Base.metadata.create_all(bind=engine)
 
-# -------------------- SCHEMAS --------------------
-
 class SKUModel(BaseModel):
     sku_id: str
     product_name: str
@@ -41,11 +31,8 @@ class SKUModel(BaseModel):
     class Config:
         orm_mode = True
 
-# -------------------- APP INIT --------------------
-
 app = FastAPI()
 
-# Enable CORS for Vercel frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://easyreplenish-frontend.vercel.app"],
@@ -54,8 +41,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# -------------------- DB DEPENDENCY --------------------
-
 def get_db():
     db = SessionLocal()
     try:
@@ -63,11 +48,9 @@ def get_db():
     finally:
         db.close()
 
-# -------------------- ROUTES --------------------
-
 @app.get("/")
 def root():
-    return {"message": "EasyReplenish API is live!"}
+    return {"message": "EasyReplenish backend live"}
 
 @app.get("/inventory", response_model=list[SKUModel])
 def get_inventory(db: Session = Depends(get_db)):
@@ -83,12 +66,3 @@ def add_sku(sku: SKUModel, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_sku)
     return {"message": "SKU added", "sku": db_sku}
-
-@app.delete("/sku/{sku_id}")
-def delete_sku(sku_id: str, db: Session = Depends(get_db)):
-    sku = db.query(SKU).filter(SKU.sku_id == sku_id).first()
-    if not sku:
-        raise HTTPException(status_code=404, detail="SKU not found")
-    db.delete(sku)
-    db.commit()
-    return {"message": "SKU deleted"}
