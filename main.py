@@ -1,63 +1,94 @@
-# 🚀 FastAPI Backend for EasyReplenish Clone
-# File: main.py
+# main.py — FastAPI Backend with SQLite, CORS, and Render Compatibility
+
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import List
-from datetime import date
+from sqlalchemy import create_engine, Column, String, Integer
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session
+import os
 
-app = FastAPI()
+# -------------------- DATABASE SETUP --------------------
 
-# In-memory mock database
-inventory_db = {}
-orders_db = {}
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATABASE_URL = f"sqlite:///{os.path.join(BASE_DIR, 'inventory.db')}"
 
-# ----------- Models -----------
+engine = create_engine(
+    DATABASE_URL, connect_args={"check_same_thread": False}
+)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
 
-class SKU(BaseModel):
+# -------------------- MODELS --------------------
+
+class SKU(Base):
+    __tablename__ = "skus"
+    sku_id = Column(String, primary_key=True, index=True)
+    product_name = Column(String)
+    current_stock = Column(Integer)
+    reorder_threshold = Column(Integer)
+
+Base.metadata.create_all(bind=engine)
+
+# -------------------- SCHEMAS --------------------
+
+class SKUModel(BaseModel):
     sku_id: str
     product_name: str
     current_stock: int
     reorder_threshold: int
 
-class Order(BaseModel):
-    order_id: str
-    sku_id: str
-    quantity: int
-    status: str  # ordered, received, returned
-    order_date: date
+    class Config:
+        orm_mode = True
 
-# ----------- API Endpoints -----------
+# -------------------- APP INIT --------------------
 
-@app.post("/sku", response_model=SKU)
-def add_sku(sku: SKU):
-    if sku.sku_id in inventory_db:
+app = FastAPI()
+
+# Enable CORS for Vercel frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://easyreplenish-frontend.vercel.app"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# -------------------- DB DEPENDENCY --------------------
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+# -------------------- ROUTES --------------------
+
+@app.get("/")
+def root():
+    return {"message": "EasyReplenish API is live!"}
+
+@app.get("/inventory", response_model=list[SKUModel])
+def get_inventory(db: Session = Depends(get_db)):
+    return db.query(SKU).all()
+
+@app.post("/sku")
+def add_sku(sku: SKUModel, db: Session = Depends(get_db)):
+    existing = db.query(SKU).filter(SKU.sku_id == sku.sku_id).first()
+    if existing:
         raise HTTPException(status_code=400, detail="SKU already exists")
-    inventory_db[sku.sku_id] = sku
-    return sku
+    db_sku = SKU(**sku.dict())
+    db.add(db_sku)
+    db.commit()
+    db.refresh(db_sku)
+    return {"message": "SKU added", "sku": db_sku}
 
-@app.get("/inventory", response_model=List[SKU])
-def get_inventory():
-    return list(inventory_db.values())
-
-@app.post("/order", response_model=Order)
-def place_order(order: Order):
-    if order.sku_id not in inventory_db:
+@app.delete("/sku/{sku_id}")
+def delete_sku(sku_id: str, db: Session = Depends(get_db)):
+    sku = db.query(SKU).filter(SKU.sku_id == sku_id).first()
+    if not sku:
         raise HTTPException(status_code=404, detail="SKU not found")
-    
-    # Reduce stock if status is ordered
-    if order.status == "ordered":
-        inventory_db[order.sku_id].current_stock -= order.quantity
-    elif order.status == "returned":
-        inventory_db[order.sku_id].current_stock += order.quantity
-
-    orders_db[order.order_id] = order
-    return order
-
-@app.get("/orders", response_model=List[Order])
-def get_orders():
-    return list(orders_db.values())
-
-@app.get("/reorder-alerts", response_model=List[SKU])
-def get_reorder_alerts():
-    return [sku for sku in inventory_db.values() if sku.current_stock < sku.reorder_threshold]
+    db.delete(sku)
+    db.commit()
+    return {"message": "SKU deleted"}
