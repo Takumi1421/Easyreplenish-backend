@@ -31,6 +31,16 @@ class Sale(Base):
     cost_price = Column(Float)
     date = Column(DateTime, default=datetime.utcnow)
 
+class Order(Base):
+    __tablename__ = "orders"
+    id = Column(Integer, primary_key=True, index=True)
+    order_id = Column(String)
+    sku_id = Column(String)
+    quantity = Column(Integer)
+    platform = Column(String)
+    status = Column(String)
+    date = Column(DateTime, default=datetime.utcnow)
+
 Base.metadata.create_all(bind=engine)
 
 class SKUModel(BaseModel):
@@ -48,6 +58,17 @@ class SaleModel(BaseModel):
     platform: str
     selling_price: float
     cost_price: float
+    date: datetime = None
+
+    class Config:
+        orm_mode = True
+
+class OrderModel(BaseModel):
+    order_id: str
+    sku_id: str
+    quantity: int
+    platform: str
+    status: str
     date: datetime = None
 
     class Config:
@@ -106,3 +127,15 @@ def calculate_profit(sku_id: str, db: Session = Depends(get_db)):
     sales = db.query(Sale).filter(Sale.sku_id == sku_id).all()
     total_profit = sum([(s.selling_price - s.cost_price) * s.quantity for s in sales])
     return {"sku_id": sku_id, "profit": total_profit}
+
+@app.post("/orders")
+def add_order(order: OrderModel, db: Session = Depends(get_db)):
+    db_order = Order(**order.dict())
+    db.add(db_order)
+    db.commit()
+    db.refresh(db_order)
+    return {"message": "Order received", "order": db_order}
+
+@app.get("/orders", response_model=list[OrderModel])
+def get_orders(db: Session = Depends(get_db)):
+    return db.query(Order).order_by(Order.date.desc()).all()
