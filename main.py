@@ -22,14 +22,33 @@ class SKU(Base):
 
 Base.metadata.create_all(bind=engine)
 
-class SKUModel(BaseModel):
+
+from sqlalchemy import Float, DateTime
+from datetime import datetime
+
+class Sale(Base):
+    __tablename__ = "sales"
+    id = Column(Integer, primary_key=True, index=True)
+    sku_id = Column(String)
+    quantity = Column(Integer)
+    platform = Column(String)
+    selling_price = Column(Float)
+    cost_price = Column(Float)
+    date = Column(DateTime, default=datetime.utcnow)
+
+Base.metadata.create_all(bind=engine)
+
+class SaleModel(BaseModel):
     sku_id: str
-    product_name: str
-    current_stock: int
-    reorder_threshold: int
+    quantity: int
+    platform: str
+    selling_price: float
+    cost_price: float
+    date: datetime = None
 
     class Config:
         orm_mode = True
+
 
 app = FastAPI()
 
@@ -56,6 +75,7 @@ def root():
 def get_inventory(db: Session = Depends(get_db)):
     return db.query(SKU).all()
 
+
 @app.post("/sku")
 def add_sku(sku: SKUModel, db: Session = Depends(get_db)):
     existing = db.query(SKU).filter(SKU.sku_id == sku.sku_id).first()
@@ -66,3 +86,24 @@ def add_sku(sku: SKUModel, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_sku)
     return {"message": "SKU added", "sku": db_sku}
+
+
+# --- New Sales Endpoints ---
+
+@app.post("/sales")
+def record_sale(sale: SaleModel, db: Session = Depends(get_db)):
+    db_sale = Sale(**sale.dict())
+    db.add(db_sale)
+    db.commit()
+    db.refresh(db_sale)
+    return {"message": "Sale recorded", "sale": db_sale}
+
+@app.get("/sales/{sku_id}", response_model=list[SaleModel])
+def get_sales(sku_id: str, db: Session = Depends(get_db)):
+    return db.query(Sale).filter(Sale.sku_id == sku_id).all()
+
+@app.get("/profit/{sku_id}")
+def calculate_profit(sku_id: str, db: Session = Depends(get_db)):
+    sales = db.query(Sale).filter(Sale.sku_id == sku_id).all()
+    total_profit = sum([(s.selling_price - s.cost_price) * s.quantity for s in sales])
+    return {"sku_id": sku_id, "profit": total_profit}
