@@ -1,9 +1,10 @@
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from sqlalchemy import create_engine, Column, String, Integer
+from sqlalchemy import create_engine, Column, String, Integer, Float, DateTime
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
+from datetime import datetime
 import os
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -20,12 +21,6 @@ class SKU(Base):
     current_stock = Column(Integer)
     reorder_threshold = Column(Integer)
 
-Base.metadata.create_all(bind=engine)
-
-
-from sqlalchemy import Float, DateTime
-from datetime import datetime
-
 class Sale(Base):
     __tablename__ = "sales"
     id = Column(Integer, primary_key=True, index=True)
@@ -38,6 +33,15 @@ class Sale(Base):
 
 Base.metadata.create_all(bind=engine)
 
+class SKUModel(BaseModel):
+    sku_id: str
+    product_name: str
+    current_stock: int
+    reorder_threshold: int
+
+    class Config:
+        orm_mode = True
+
 class SaleModel(BaseModel):
     sku_id: str
     quantity: int
@@ -49,12 +53,11 @@ class SaleModel(BaseModel):
     class Config:
         orm_mode = True
 
-
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://easyreplenish-frontend.vercel.app"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -75,7 +78,6 @@ def root():
 def get_inventory(db: Session = Depends(get_db)):
     return db.query(SKU).all()
 
-
 @app.post("/sku")
 def add_sku(sku: SKUModel, db: Session = Depends(get_db)):
     existing = db.query(SKU).filter(SKU.sku_id == sku.sku_id).first()
@@ -86,9 +88,6 @@ def add_sku(sku: SKUModel, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_sku)
     return {"message": "SKU added", "sku": db_sku}
-
-
-# --- New Sales Endpoints ---
 
 @app.post("/sales")
 def record_sale(sale: SaleModel, db: Session = Depends(get_db)):
